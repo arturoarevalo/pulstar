@@ -1,0 +1,33 @@
+{
+  "name": "schemify",
+  "version": "1.1.0",
+  "description": "Collection of algorithms for writing distributed, shared-nothing systems.",
+  "main": "./lib/index.js",
+  "scripts": {
+    "test": "mocha --require test/fix_tests.js --compilers coffee:coffee-script ./test/*.iced",
+    "prepublish": "rm -rf lib && mkdir lib && iced -b -c -o lib/ -I node src/*.iced"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arturoarevalo/pulstar.git"
+  },
+  "keywords": [
+    "distributed",
+    "shared-nothing",
+    "raft",
+    "scuttlebutt",
+    "gossip",
+    "consensus"
+  ],
+  "author": "Arturo Arévalo",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/arturoarevalo/pulstar/issues"
+  },
+  "homepage": "https://github.com/arturoarevalo/pulstar#readme",
+  "devDependencies": {
+    "iced-coffee-script": "^108.0.9"
+  },
+  "dependencies": {
+  }
+}
