@@ -7,3 +7,6 @@ script/
 src/
 samples/
 playground/
+
+*.sublime-workspace
+*.sublime-project
