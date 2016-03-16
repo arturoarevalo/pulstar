@@ -1,8 +1,7 @@
 
-{Raft} = require "../src"
+Raft = require "../src/raft"
 
 
 
 instance = new Raft
-console.log instance
-instance.print()
+console.log instance.servers
