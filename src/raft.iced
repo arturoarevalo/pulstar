@@ -332,6 +332,196 @@ class Raft
 
     # Section 3.4
     startElection: ->
+        # leaders can't start the election process
+        return if @state is "leader"
+
+        @logger.info "new state 'candidate'"
+
+        @state = "candidate"
+        @updateTerm()
+
+        @votedFor = @id
+        @votesGranted[@id] = true
+        @pendingPersist = true
+        @resetElectionTimer()
+
+        @sendRPCs "requestVote",
+            term: @currentTerm
+            candidateId: @id
+            lastLogIndex: @log.length - 1
+            lastLogTerm: @log[@log.length - 1].term
+
+
+    terminate: ->
+        @logger.info "terminating"
+
+        @heartbeatTimer = @unschedule @heartbeatTimer if @heartbeatTimer
+        @clearElectionTimer()
+
+        # TODO
+        # disable API.requestVote & API.appendEntries
+
+
+
+    #
+    # RPC / API
+    # 
+    
+    requestVote: (args) ->
+        @logger.debug "rpc - requestVote", JSON.stringify args
+
+        if args.term > @currentTerm
+            @updateTerm args.term
+            @stepDown()
+
+        if args.term < @currentTerm
+            await @saveBefore defer error
+            @sendRPC args.candidateId, "requestVoteResponse",
+                term: @currentTerm
+                voteGranted: false
+                sourceId: @id
+
+            return
+
+        if (@votedFor is null or @votedFor is args.candidateId) and
+            (args.lastLogTerm >= @log[@log.length - 1].term or 
+                (args.lastLogTerm is @log[@log.length - 1].term and args.lastLogTerm >= @log.length - 1))
+            @votedFor = args.candidateId
+            @pendingPersist = true
+            @resetElectionTimer()
+            await @saveBefore defer error
+            @sendRPC args.candidateId, "requestVoteResponse",
+                term: @currentTerm
+                voteGranted: true
+                sourceId: @id
+            return
+
+        await @saveBefore defer error
+        @sendRPC args.candidateId, "requestVoteResponse",
+            term: @currentTerm
+            voteGranted: false
+            sourceId: @id
+
+
+    requestVoteResponse: (args) ->
+        @logger.debug "rpc - requestVoteResponse", JSON.stringify args
+
+        if args.term > @currentTerm
+            @updateTerm args.term
+            @stepDown()
+            return
+
+        otherId = args.sourceId
+
+        # ignore if we're not a candidate
+        if @state isnt "cantidate" or args.term < @currentTerm
+            return
+
+        if args.voteGranted
+            @logger.debug "got a vote from", otherId
+            @votesGranted[otherId] = true
+
+        @logger.debug "current votes", Object.keys @votesGranted
+
+        # check if we won the election
+        if @checkVote @serverMap, votesGranted
+            @becomeLeader()
+
+
+    appendEntries: (args) ->
+        @logger.debug "rpc - appendEntries", JSON.stringify args
+
+        # 1. reply false if term < currentTerm
+        if args.term < @currentTerm
+            await @saveBefore defer error
+            @sendRPC args.leaderId, "appendEntriesResponse",
+                term: @currentTerm
+                sucess: false
+                sourceId: @id
+                curAgreeIndex: @curAgreeIndex
+            return
+
+        # step down if we're candidate or leader
+        @stepDown()
+        if @leaderId isnt args.leaderId
+            @leaderId = args.leaderId
+            @logger.info "new leader", @leaderId
+
+        @resetElectionTimer()
+
+        # TODO
+        # if we've pending clientCallbacks, it means that we were a leader
+        # but lost our position ... reject the clientCallbacks with a 
+        # "not_leader" response
+        
+        # 2. reply false if log doesn't contain any entry at prevLogIndex whose
+        #    term matches prevLogTerm 
+        if (@log.length - 1 < args.prevLogIndex) or (@log[args.prevLogIndex].term isnt args.prevLogTerm)
+            await @saveBefore defer error
+            @sendRPC args.leaderId, "appendEntriesResponse",
+                term: @currentTerm
+                sucess: false
+                sourceId: @id
+                curAgreeIndex: args.curAgreeIndex
+            return
+
+        # 3. If existing entry conflicts with new entry (same index
+        #    but different terms), delete the existing entry
+        #    and all that follow. TODO: make this match the
+        #    description.
+        if args.prevLogIndex + 1 < @log.length
+            @log.splice args.prevLogIndex + 1, @log.length
+
+        # 4. append any new entries not already in the log
+        if args.entries.length > 0
+            addEntries args.entries
+            pendingPersist = true
+
+        # 5. if leaderCommit > commitIndex, set
+        #    commitIndex = min(leaderCommit, index of last new entry)
+        if args.leaderCommit > @commitIndex
+            @commitIndex = Math.min args.leaderCommit, @log.length - 1
+            @applyEntries()
+
+        await saveBefore defer error
+        @sendRPC args.leaderId, "appendEntriesResponse",
+            term: @currentTerm
+            success: true
+            sourceId: @id
+            curAgreeIndex: args.curAgreeIndex
+
+
+
+    appendEntriesResponse: (args) ->
+        @logger.debug "rpc - appendEntriesResponse", JSON.stringify args
+
+        # shouldn't happen ...
+        if args.term > @currentTerm
+            @updateTerm args.term
+            @stepDown()
+            return
+
+        sid = args.sourceId
+        if args.success
+            # The log entry is considered commited if it's stored on a
+            # majority of nodes. Also, at least one entry from the leader's
+            # must also be stored on a majority of nodes.
+            @matchIndex[sid] = args.curAgreeIndex
+            @nextIndex[sid] = args.curAgreeIndex + 1
+            @checkCommits()
+        else
+            @nextIndex[sid]--
+            if @nextIndex[sid] is 0
+                # The first log entry is always the same, so start with the
+                # second (setting nextIndex[sid] to 0 results in occasional
+                # errors from -1 indexing into the log).
+                @logger.debug "forcing nextIndex[#{sid}] to 1"
+                @nextIndex[sid] = 1
+
+            # TODO - Resend immediately
+
+
+
 
 
 
