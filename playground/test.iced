@@ -3,5 +3,6 @@ Raft = require "../src/raft"
 
 
 
-instance = new Raft
-console.log instance.servers
+instance = new Raft "machine-1", { firstServer : true }
+
+instance.initialize()

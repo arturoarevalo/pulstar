@@ -29,6 +29,7 @@
     "iced-coffee-script": "^108.0.9"
   },
   "dependencies": {
-    "coffee-script-properties": "^1.0.0"
+    "coffee-script-properties": "^1.0.0",
+    "winston-color": "^1.0.0"
   }
 }

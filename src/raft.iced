@@ -1,35 +1,99 @@
 require "coffee-script-properties"
 
 ###
-RAFT consesus algorithm as described in 
+RAFT consensus algorithm as described in 
 http://ramcloud.stanford.edu/raft.pdf
 ###    
+
+
+class RaftAbstractStateMachine
+    constructor: (id, options) ->
+        @logger = options?.logger or require "winston-color"
+
+    applyCommand: (command) ->
+        @logger.info "applying state machine command", command
+
+        return true
+
+
+
+class RaftAbstractChannel
+    constructor: (id, options) ->
+        @logger = options?.logger or require "winston-color"
+
+    executeRPC: (id, name, args) ->
+        @logger.debug "RPC to", id, name
+
+
+
+class RaftAbstractStorage
+    constructor: (id, options) ->
+        @logger = options?.logger or require "winston-color"
+
+    save: (state, callback) -> callback? false
+
+    load: (callback) -> callback? false
+
+
+
+class RaftInMemoryChannel extends RaftAbstractChannel
+    constructor: (id, options) ->
+        super id, options
+
+
+class RaftInMemoryStorage extends RaftAbstractStorage
+    @store : {}
+
+    constructor: (id, options) ->
+        super id, options
+
+    save: (state, callback) ->
+        RaftInMemoryStorage.store[@id] = state
+        @logger.debug "saved state", state
+        console.log state
+        callback? true
+
+    load: (callback) ->
+        data = RaftInMemoryStorage.store[@id]
+
+        if data
+            callback? true, data
+        else
+            callback? false
+
+
+
+
+RaftStates = 
+    LEADER: "leader"
+    FOLLOWER: "follower"
+    CANDIDATE: "candidate"
+
 
 class Raft
 
 
-    schedule: (fn, ms, data) -> setTimeout fn, ms
+    schedule: (fn, ms = 0, data = null) -> 
+        cb = (d) => fn d
+        setTimeout cb, ms, data
     
     unschedule: (id) -> clearTimeout id
 
 
-    saveState: (data, callback) ->
-        callback? false
-
-    loadState: (callback) ->
-        callback? false
-
-
     constructor: (id, options) ->
+        @id = id
+        @logger = options?.logger or require "winston-color"
+
+        @storage = options?.storage or new RaftInMemoryStorage @id, { logger: @logger }
+        @channel = options?.channel or new RaftInMemoryChannel @id, { logger: @logger }
+        @stateMachine = options?.stateMachine or new RaftAbstractStateMachine @id, { logger: @logger }
 
         @options = 
             electionTimeout: 300
             heartbeatTime: 60
-            stateMachineStart: {}
-            firstServer: false
+            firstServer: options?.firstServer or false
             serverData: { id: true }
             verbose: true
-            logger: (args...) -> console.log args...
 
 
         # Persistent state - ALL SERVERS
@@ -40,8 +104,7 @@ class Raft
         # Volatile data - ALL SERVERS
         @commitIndex = 0
         @lastApplied = 0
-        @state = "follower"
-        @stateMachine = @options.stateMachineStart
+        @state = RaftStates.FOLLOWER
         @serverMap = {}
         
         # Volatile data - LEADERS
@@ -62,6 +125,7 @@ class Raft
         @pendingConfigChange = false
 
 
+
     ###*
      * Returns a list will all server IDs.
     ###
@@ -77,7 +141,7 @@ class Raft
     ###*
      * Reset the election timer to a random value in the range [electionTimeout, electionTimeout * 2].
     ###
-    resetElectionTimer: -> 
+    resetElectionTimer: ->
         timeout = @options.electionTimeout + parseInt Math.random() * @options.electionTimeout
         @clearElectionTimer()
         @electionTimer = @schedule @startElection, timeout
@@ -86,8 +150,7 @@ class Raft
     ###*
      * Set our term value.
     ###
-    updateTerm: (term) ->
-        term = @currentTerm + 1 if "undefined" is typeof term
+    updateTerm: (term = @currentTerm + 1) ->
         @currentTerm = term
         @votedFor = null
         @pendingPersist = true
@@ -98,8 +161,10 @@ class Raft
      * Become a follower and start the election timeout timer.
     ###
     stepDown: ->
-        return if @state is "follower"
-        @state = "follower"
+        return if @state is RaftStates.FOLLOWER
+
+        @state = RaftStates.FOLLOWER
+        @logger.info "new state #{@state}"
 
         # TODO - move
         @heartbeatTimer = @unschedule @heartbeatTimer if @heartbeatTimer
@@ -112,7 +177,7 @@ class Raft
     ###
     sendRPCs: (rpc, args) ->
         for id in @servers when id isnt @id
-            @sendRPC id, rpc, args
+            @channel.executeRPC id, rpc, args
 
 
     saveBefore: (callback) ->
@@ -123,7 +188,9 @@ class Raft
                 log: @log
 
             @pendingPersist = false
-            await @saveState data, defer success
+            await @storage.save data, defer success
+
+            console.log @serverMap
 
             @logger.error "Failed to persist state" if not success
 
@@ -131,7 +198,7 @@ class Raft
 
 
     loadBefore: (callback) ->
-        await @loadState defer success, data
+        await @storage.load defer success, data
 
         if success and @options.firstServer
             @options.firstServer = false
@@ -153,6 +220,7 @@ class Raft
             @votedFor = null
             @addEntries [{ newServer: @id, oldServers: [] }], true
             @logger.info "This is the first server, assuming leadership"
+            @becomeLeader()
 
         else
             # if no data was loaded and we're not the first server, we'll have an empty log
@@ -169,8 +237,8 @@ class Raft
 
     addEntries: (entries, startup) ->
         for entry in entries
-            entry.term = @currentTerm if "undefined" is typeof @entry.term
-            entry.command = null if "undefined" is typeof @entry.command
+            entry.term = @currentTerm if "undefined" is typeof entry.term
+            entry.command = null if "undefined" is typeof entry.command
 
             if entry.newServer
                 @logger.debug "adding new server #{entry.newServer}"
@@ -204,7 +272,7 @@ class Raft
                 @logger.debug "applying command #{command}"
 
                 try
-                    @applyCommand @stateMachine, command
+                    @stateMachine.applyCommand command
                     status = "success"
                 catch e
                     result = e.message
@@ -217,7 +285,7 @@ class Raft
                 callbacks[@lastApplied] = {callback, status, result}
                 delete @clientCallbacks[@lastApplied]
 
-            await @saveBefore
+            await @saveBefore defer error
 
             for cb in callbacks
                 cb.callback? cb.status, cb.result
@@ -255,7 +323,7 @@ class Raft
 
 
     leaderHeartbeat: ->
-        return if @state isnt "leader"
+        return if @state isnt RaftStates.LEADER
 
         for id in @servers when id isnt @id
             nindex = @nextIndex[id] - 1
@@ -265,7 +333,7 @@ class Raft
             if nentries.length
                 @logger.debug "new entries to node #{id}", JSON.stringify nentries
 
-            @sendRPC id, "appendEntries",
+            @channel.executeRPC id, "appendEntries",
                 term: @currentTerm
                 leaderId: @id
                 prevLogIndex: nindex
@@ -309,11 +377,11 @@ class Raft
 
 
     becomeLeader: ->
-        return if @state is "leader"
+        return if @state is RaftStates.LEADER
 
-        @logger.info "new state 'leader'"
+        @state = RaftStates.LEADER
+        @logger.info "new state #{@state}"
 
-        @state = "leader"
         @leaderId = @id
         @votesResponded = {}
         @votesGranted = {}
@@ -333,11 +401,11 @@ class Raft
     # Section 3.4
     startElection: ->
         # leaders can't start the election process
-        return if @state is "leader"
+        return if @state is RaftStates.LEADER
 
-        @logger.info "new state 'candidate'"
+        @state = RaftStates.CANDIDATE
+        @logger.info "new state #{@state}"
 
-        @state = "candidate"
         @updateTerm()
 
         @votedFor = @id
@@ -474,7 +542,7 @@ class Raft
 
         # 4. append any new entries not already in the log
         if args.entries.length > 0
-            addEntries args.entries
+            @addEntries args.entries
             pendingPersist = true
 
         # 5. if leaderCommit > commitIndex, set
@@ -483,7 +551,7 @@ class Raft
             @commitIndex = Math.min args.leaderCommit, @log.length - 1
             @applyEntries()
 
-        await saveBefore defer error
+        await @saveBefore defer error
         @sendRPC args.leaderId, "appendEntriesResponse",
             term: @currentTerm
             success: true
@@ -522,7 +590,190 @@ class Raft
 
 
 
+    addServers: (args, callback) ->
+        @logger.debug "rpc - addServers", JSON.stringify args
 
+        # 1. Reply NOT_LEADER if not leader (6.2)
+        if @state isnt RaftStates.LEADER
+            callback
+                status: "NOT_LEADER"
+                leaderHint: @leaderId
+            return
+
+        # NOTE: this is an addition to the Raft algorithm:
+        # Instead of doing steps 2 and 3, just reject config
+        # changes while an existing one is pending.
+        # 2. Catch up new server for a fixed number of rounds. Reply
+        #    TIMEOUT if new server does not make progress for an
+        #    election timeout or if the last round takes longer than
+        #    the election timeout (4.2.1)
+        # 3. Wait until previous configuration in the log is
+        #    committed (4.1)
+        if @pendingConfigChange
+            callback
+                status: "PENDING_CONFIG_CHANGE"
+                leaderHint: @leaderId
+            return
+
+        # NOTE: addition to Raft algorithm. If server is not in
+        # serverData we cannot connect to it so reject it.
+        if !(args.newServer of opts.serverData)
+            callback
+                status: "NO_CONNECTION_INFO"
+                leaderHint: @leaderId
+            return
+    
+        # NOTE: addition to Raft algorithm. If server is already
+        # a member, reject it.
+        if args.newServer of @options.serverMap
+            callback
+                status: "ALREADY_A_MEMBER"
+                leaderHint: @leaderId
+            return
+
+        # 4. Append new configuration entry to the log (old
+        #    configuration plus newServer), commit it using majority
+        #    of new configuration (4.1)
+        @pendingConfigChange = true
+        @addEntries [ {
+            oldServers: @servers
+            newServer: args.newServer
+            } ]
+
+        @clientCallbacks[@log.length - 1] = ->
+            @pendingConfigChange = false
+            # 5. Reply OK
+            callback
+                status: 'OK'
+                leaderHint: @leaderId
+            return
+
+        @updateIndexes()
+        @pendingPersist = true
+
+        # trigger leader heartbeat
+        @schedule @leaderHeartbeat, 1
+
+
+    addServerResponse: (args) ->
+        @logger.debug "rpc - addServerResponse", JSON.stringify args
+
+
+
+    removeServer: (args, callback) ->
+        @logger.debug "rpc - removeServer", JSON.stringify args
+
+        # 1. Reply NOT_LEADER if not leader (6.2)
+        if @state isnt RaftStates.LEADER
+            callback 
+                status: "NOT_LEADER"
+                leaderHint: @leaderId
+            return
+
+        # NOTE: this is an addition to the Raft algorithm:
+        # Instead of doing step 2, just reject config changes while
+        # an existing one is pending.
+        # 2. Wait until previous configuration in the log is
+        #    committed (4.1)
+        if @pendingConfigChange
+            callback
+                status: 'PENDING_CONFIG_CHANGE'
+                leaderHint: @leaderId
+            return
+        
+        # NOTE: addition to Raft algorithm. If server is not in the
+        # map, reject it.
+        if !args.oldServer of @serverMap
+            callback
+                status: 'NOT_A_MEMBER'
+                leaderHint: @leaderId
+            return
+
+        # 3. Append new configuration entry to the log (old
+        #    configuration without oldServer), commit it using
+        #    majority of new configuration (4.1)
+        @pendingConfigChange = true
+        @addEntries [ {
+            oldServers: @servers
+            oldServer: args.oldServer
+        } ]
+
+        @clientCallbacks[@log.length - 1] = ->
+            @pendingConfigChange = false
+            # 4. Reply OK, and if this server was removed, step down
+            #    (4.2.2)
+            # TODO: step down and terminate
+            callback
+                status: 'OK'
+                leaderHint: @leaderId
+            return
+
+        @updateIndexes()
+        @pendingPersist = true
+
+        # trigger leader heartbeat
+        @schedule @leaderHeartbeat, 1
+
+
+    removeServerResponse: (args) ->
+        @logger.debug "rpc - removeServerResponse", JSON.stringify args
+
+
+    clientRequest: (cmd) ->
+        callback = (args) ->
+            @sendRPC cmd.responseId, "clientRequestResponse", args if cmd.responseId
+
+        if @state isnt RaftStates.LEADER
+            callback 
+                status: "NOT_LEADER"
+                leaderHint: @leaderId
+            return
+
+        # NOTE: this is an addition to the basic Raft algorithm:
+        # Read-only operations are applied immediately against the
+        # current state of the stateMachine (i.e. committed state)
+        # and are not added to the log. Otherwise, the cmd is added
+        # to the log and the client callback will be called when the
+        # cmd is is committed. See 8
+        tcmd = @copyMap cmd
+        delete tcmd.responseId
+        if tcmd.ro
+            status = null
+            try
+                result = @stateMachine.applyCommand cmd
+                status = 'success'
+            catch exc
+                result = exc
+                status = 'error'
+            callback
+                status: status
+                result: result
+        else
+            @clientCallbacks[@log.length] = callback
+            @addEntries [ { command: tcmd } ]
+            @pendingPersist = true
+
+            # trigger leader heartbeat
+            @schedule @leaderHeartbeat, 1
+
+
+    clientRequestResponse: (args) ->
+        @logger.debug "rpc - clientRequestResponse", JSON.stringify args
+
+
+
+
+    initialize: ->
+        @schedule =>
+            @logger.info "initializing"
+            await @loadBefore defer error
+            @logger.info "initialized"
+
+
+    copyMap: (obj) ->
+        nobj = {}
+        nobj[key] = value for key, value of obj
+        return nobj
 
 
 module.exports = Raft
