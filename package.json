@@ -1,5 +1,5 @@
 {
-  "name": "schemify",
+  "name": "pulstar",
   "version": "1.1.0",
   "description": "Collection of algorithms for writing distributed, shared-nothing systems.",
   "main": "./lib/index.js",
