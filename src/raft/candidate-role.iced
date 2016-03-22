@@ -7,12 +7,12 @@ class CandidateRole extends Role
         @votes =
             self: true
 
-    beginElection: ->
+    beginElection: =>
         @emit "changeRole", "candidate"
 
     assertRole: (message, rpc) ->
         if message.term > @log.currentTerm
-            @log.currentTerm = message.currentTerm
+            @log.currentTerm = message.term
             @log.votedFor = 0
             @clearElectionTimeout()
             @emit "changeRole", "follower"

@@ -4,10 +4,13 @@ FollowerRole = require "./follower-role"
 CandidateRole = require "./candidate-role"
 LeaderRole = require "./leader-role"
 
+{EventEmitter} = require "events"
 
-class RaftServer 
+
+class RaftServer extends EventEmitter
 
     constructor: (@id, @storage, @stateMachine, @options) ->
+        @logger = options?.logger or require "winston-color"
         @role = null
         @log = new Log @storage, @stateMachine, @options
         @requests = {}
@@ -17,10 +20,13 @@ class RaftServer
         @log.on "execute", @onExecuted
 
 
-    onChangeRole: (name) ->
+    onChangeRole: (name) =>
         if @role
             @role.removeListener "changeRole", @onChangeRole
-            @role.removeListener "appendEntries", @nAppendEntries
+            @role.removeListener "appendEntries", @onAppendEntries
+            @logger.info @id, "new role", name
+        else
+            @logger.info @id, "initial role", name
 
         switch name
             when "follower" 
@@ -30,7 +36,7 @@ class RaftServer
             when "candidate"
                 @role = new CandidateRole @log, @options
                 @role.resetElectionTimeout()
-                @role.beginElection()
+                @beginElection()
 
             when "leader"
                 peers = Object.keys @peerMap
@@ -48,14 +54,17 @@ class RaftServer
         request?.callback? result
 
     
-    onAppendEntries: (id, message) ->
+    onAppendEntries: (id, message) =>
+        return if id is @id
+
         # TODO : CHANNEL COMUNNICATION
-         
         message.leaderId = @id
         peer = @peerMap[id]
         return if not peer
 
+        @logger.info @id, "calling appendEntries on", id, message
         await peer.appendEntries message, defer error, response
+        @logger.info @id, "calling appendEntries on", id, "response", error, response
 
         # TODO: error checking
         @role.assertRole response
@@ -65,10 +74,11 @@ class RaftServer
     start: (peers, role) ->
         role ?= "follower"
         @peers = peers
-        for peer in @peers
+        for peer in @peers #when peer.id isnt @id
             @peerMap[peer.id] = peer
 
         await @log.load defer success
+
         @onChangeRole role
 
 
@@ -79,10 +89,15 @@ class RaftServer
             lastLogIndex: @log.lastIndex
             lastLogTerm: @log.lastTerm
 
-        await @log.requestVote message, defer success
+        @logger.info @id, "log request vote message", message
 
-        for peer in @peers
-            await peer.requestVote message, defer vote
+        await @log.requestVote message, defer error, success
+
+        @logger.info @id, "log request vote success", error, success
+
+        for peer in @peers when peer.id isnt @id
+            await peer.requestVote message, defer error, vote
+            @logger.info "peer request vote response", vote
             @countVote vote
 
     countVote: (vote) ->
@@ -93,12 +108,11 @@ class RaftServer
 
 
     requestVote: (message, callback) ->
+        @logger.info @id, "peer request vote", message
         @role.assertRole message
-        await role.requestVote message, defer voteGranted
-        callback? @requestVoteResponse voteGranted
+        await @role.requestVote message, defer error, voteGranted
 
-    requestVoteResponse: (voteGranted) ->
-        return {
+        callback? error, {
             id: @id
             term: @log.currentTerm
             voteGranted: voteGranted

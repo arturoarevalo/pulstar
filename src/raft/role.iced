@@ -5,7 +5,7 @@ class Role extends EventEmitter
     constructor: (@log, @state, options) ->
         @logger = options?.logger or require "winston-color"
 
-        @electionTimeout = options?.electionTimeout or 200
+        @electionTimeout = options?.electionTimeout or 2000
         @electionTimer = null
 
     clearElectionTimeout: ->

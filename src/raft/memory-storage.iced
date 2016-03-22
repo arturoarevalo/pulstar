@@ -5,8 +5,8 @@ class MemoryStorage extends AbstractStorage
     constructor: (options) ->
         super options
 
-        state = {}
-        entries = []
+        @state = {}
+        @entries = []
 
     set: (hash, callback) ->
         for key, value of hash
@@ -15,7 +15,7 @@ class MemoryStorage extends AbstractStorage
         callback? null
  
     get: (keys, callback) ->
-        keys ?= Object.keys @data
+        keys ?= Object.keys @state
 
         result = {}
         for key in keys

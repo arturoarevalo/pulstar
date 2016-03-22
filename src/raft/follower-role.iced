@@ -7,7 +7,7 @@ class FollowerRole extends Role
 
         @leaderId = 0
 
-    beginElection: ->
+    beginElection: =>
         @emit "changeRole", "candidate"
 
     assertRole: (message) ->

@@ -8,7 +8,7 @@ class LeaderRole extends Role
         @peers = peers
         @nextIndex = {}
         @matchIndex = {}
-        @hearbeatInterval = options?.hearbeatInterval or 50
+        @hearbeatInterval = options?.hearbeatInterval or 500
         @heartbeatTimer = null
 
 
@@ -17,7 +17,8 @@ class LeaderRole extends Role
             clearTimeout @heartbeatTimer
             @heartbeatTimer = null
 
-    broadcastEntries: ->
+    broadcastEntries: =>
+        @logger.info "leader heartbeat"
         @clearHeartbeat
         @sendAppendEntries id for id in @peers
         @heartbeatTimer = setTimeout @broadcastEntries, @hearbeatInterval
