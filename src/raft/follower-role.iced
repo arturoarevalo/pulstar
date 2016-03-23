@@ -30,7 +30,11 @@ class FollowerRole extends Role
 
     request: (entry, callback) ->
         # Error ...
-        callback? { message: "not the leader", leaderId: @leaderId }
+        error = 
+            message: "not the leader"
+            leaderId: @leaderId
+
+        process.nextTick callback, error
 
 
 module.exports = FollowerRole

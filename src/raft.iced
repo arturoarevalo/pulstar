@@ -351,7 +351,7 @@ class Raft
 
     checkVote: (serverMap, voteMap) ->
         scnt = @servers.length
-        need = Math.round (scnt + 1) / 2
+        needed = Math.round (scnt + 1) / 2
         votes = {}
 
         for k in serverMap
@@ -444,12 +444,10 @@ class Raft
 
         if args.term < @currentTerm
             await @saveBefore defer error
-            @sendRPC args.candidateId, "requestVoteResponse",
+            return @sendRPC args.candidateId, "requestVoteResponse",
                 term: @currentTerm
                 voteGranted: false
                 sourceId: @id
-
-            return
 
         if (@votedFor is null or @votedFor is args.candidateId) and
             (args.lastLogTerm >= @log[@log.length - 1].term or 
@@ -458,11 +456,10 @@ class Raft
             @pendingPersist = true
             @resetElectionTimer()
             await @saveBefore defer error
-            @sendRPC args.candidateId, "requestVoteResponse",
+            return @sendRPC args.candidateId, "requestVoteResponse",
                 term: @currentTerm
                 voteGranted: true
                 sourceId: @id
-            return
 
         await @saveBefore defer error
         @sendRPC args.candidateId, "requestVoteResponse",
@@ -492,7 +489,7 @@ class Raft
         @logger.debug "current votes", Object.keys @votesGranted
 
         # check if we won the election
-        if @checkVote @serverMap, votesGranted
+        if @checkVote @serverMap, @votesGranted
             @becomeLeader()
 
 
@@ -502,12 +499,11 @@ class Raft
         # 1. reply false if term < currentTerm
         if args.term < @currentTerm
             await @saveBefore defer error
-            @sendRPC args.leaderId, "appendEntriesResponse",
+            return @sendRPC args.leaderId, "appendEntriesResponse",
                 term: @currentTerm
                 sucess: false
                 sourceId: @id
                 curAgreeIndex: @curAgreeIndex
-            return
 
         # step down if we're candidate or leader
         @stepDown()
@@ -526,12 +522,12 @@ class Raft
         #    term matches prevLogTerm 
         if (@log.length - 1 < args.prevLogIndex) or (@log[args.prevLogIndex].term isnt args.prevLogTerm)
             await @saveBefore defer error
-            @sendRPC args.leaderId, "appendEntriesResponse",
+            return @sendRPC args.leaderId, "appendEntriesResponse",
                 term: @currentTerm
                 sucess: false
                 sourceId: @id
                 curAgreeIndex: args.curAgreeIndex
-            return
+            
 
         # 3. If existing entry conflicts with new entry (same index
         #    but different terms), delete the existing entry
@@ -617,7 +613,7 @@ class Raft
 
         # NOTE: addition to Raft algorithm. If server is not in
         # serverData we cannot connect to it so reject it.
-        if !(args.newServer of opts.serverData)
+        if !(args.newServer of @options.serverData)
             callback
                 status: "NO_CONNECTION_INFO"
                 leaderHint: @leaderId

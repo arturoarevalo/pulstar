@@ -16,11 +16,11 @@ class LeaderRole extends Role
         if @heartbeatTimer
             clearTimeout @heartbeatTimer
             @heartbeatTimer = null
-
+    
     broadcastEntries: =>
         @logger.info "leader heartbeat"
-        @clearHeartbeat
         @sendAppendEntries id for id in @peers
+        @clearHeartbeat()
         @heartbeatTimer = setTimeout @broadcastEntries, @hearbeatInterval
 
 
@@ -71,12 +71,11 @@ class LeaderRole extends Role
             @log.updateCommitIndex majorityIndex
 
 
-    entriesAppended: (id, message, response) ->
-        if response.success
-            matchIndex = message.entries.startIndex + message.entries.values.length - 1
-            @matchIndex[id] = matchIndex
-            @nextIndex[id] = matchIndex + 1
-            if matchIndex > @log.commitIndex
+    entriesAppended: (id, message) ->
+        if message.success
+            @matchIndex[id] = message.matchIndex
+            @nextIndex[id] = message.matchIndex + 1
+            if message.matchIndex > @log.commitIndex
                 @updateCommitIndex()
         else
             # If AppendEntries fails because of log inconsistency, decrement nextIndex

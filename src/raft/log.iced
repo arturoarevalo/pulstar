@@ -44,12 +44,14 @@ class Log extends EventEmitter
     appendEntries: (message, callback) ->
         # Check if caller is out of date.
         if message.term < @currentTerm
-            return callback? null, false
+            @logger.debug "[log]", "appendEntries", "caller out of date", "message.term =", message.term, "currentTerm =", @currentTerm
+            return process.nextTick callback, null, false
 
         previousEntry = @entryAt message.prevLogIndex
 
         # Check if we're out of date.
-        if (@lastIndex < message.prevLogIndex) or (previousEntry?.term isnt message.prevLogTerm)
+        if (@lastIndex < message.prevLogIndex) or (previousEntry and previousEntry.term isnt message.prevLogTerm)
+            @logger.debug "[log]", "appendEntries", "out of date", "lastIndex =", @lastIndex, "message =", message, "prevEntry =", previousEntry
             return callback? null, false
 
         # TODO - convert to static
@@ -58,7 +60,7 @@ class Log extends EventEmitter
         # Check for heartbeats.
         if newEntries.length is 0
             @updateCommitIndex message.leaderCommit
-            return callback? null, true
+            return process.nextTick callback, null, true
 
         # The currentTerm could only have changed if votedFor = 0 & votedFor can't
         # change in a term, so we can use it as a heuristic for when to write state.
@@ -73,27 +75,29 @@ class Log extends EventEmitter
             @entries = @entries.concat newEntries.values
             @updateCommitIndex message.leaderCommit
 
-        callback? error, not error
-
+        process.nextTick callback, error, not error
 
     
     #
     # callback (err, success)
     # 
     requestVote: (message, callback) ->
+        error = null
+        voteGranted = false
+
         # Check if caller is out of date.
         if message.term < @currentTerm
-            return callback? null, false
+            @logger.debug "[log]", "requestVote", message, "error =", error, "voteGranted =", voteGranted
+            process.nextTick callback, error, voteGranted
 
         if not @votedFor or @votedFor is message.candidateId
             if (message.lastLogTerm > @lastTerm) or (message.lastLogTerm is @lastTerm and message.lastLogIndex >= @lastIndex)
-
                 @votedFor = message.candidateId
                 await @storage.set { @votedFor, @currentTerm }, defer error
+                voteGranted = not error
 
-                return callback? error, not error
-
-        callback? null, false
+        @logger.debug "[log]", "requestVote", message, "error =", error, "voteGranted =", voteGranted
+        process.nextTick callback, error, voteGranted
 
 
     entriesSince: (index) ->
@@ -106,6 +110,7 @@ class Log extends EventEmitter
     updateCommitIndex: (index) ->
         if index > @commitIndex
             @commitIndex = Math.min index, @lastIndex
+            @logger.debug "[log]", "updateCommitIndex", @commitIndex
             @execute @commitIndex
 
 
@@ -121,6 +126,8 @@ class Log extends EventEmitter
     executeEntry: (index, callback) ->
         entry = @entryAt index
         return callback? null if entry.noop
+
+        @logger.debug "[log]", "executeEntry", index, entry
 
         await @stateMachine.execute entry.op, defer error, result
 

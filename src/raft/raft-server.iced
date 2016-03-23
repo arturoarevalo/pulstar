@@ -24,9 +24,9 @@ class RaftServer extends EventEmitter
         if @role
             @role.removeListener "changeRole", @onChangeRole
             @role.removeListener "appendEntries", @onAppendEntries
-            @logger.info @id, "new role", name
+            @logger.info "new role ->", name
         else
-            @logger.info @id, "initial role", name
+            @logger.info "initial role ->", name
 
         switch name
             when "follower" 
@@ -59,16 +59,9 @@ class RaftServer extends EventEmitter
 
         # TODO : CHANNEL COMUNNICATION
         message.leaderId = @id
-        peer = @peerMap[id]
-        return if not peer
 
-        @logger.info @id, "calling appendEntries on", id, message
-        await peer.appendEntries message, defer error, response
-        @logger.info @id, "calling appendEntries on", id, "response", error, response
-
-        # TODO: error checking
-        @role.assertRole response
-        @role.entriesAppended id, message, response
+        @logger.debug "RPC to [#{id}]", "appendEntries", "request", message
+        @callRPC id, "appendEntries", message
 
 
     start: (peers, role) ->
@@ -82,49 +75,69 @@ class RaftServer extends EventEmitter
         @onChangeRole role
 
 
+    callRPC: (id, method, message) ->
+        peer = @peerMap[id]
+        return if not peer
+
+        process.nextTick peer[method], message
+
+
     beginElection: ->
         @log.currentTerm++
         message =
             term: @log.currentTerm
+            candidateId: @id
             lastLogIndex: @log.lastIndex
             lastLogTerm: @log.lastTerm
 
-        @logger.info @id, "log request vote message", message
+        @logger.info "begin election"
 
         await @log.requestVote message, defer error, success
 
-        @logger.info @id, "log request vote success", error, success
-
         for peer in @peers when peer.id isnt @id
-            await peer.requestVote message, defer error, vote
-            @logger.info "peer request vote response", vote
-            @countVote vote
+            @callRPC peer.id, "requestVote", message
 
-    countVote: (vote) ->
-        return if vote.term < @log.currentTerm
+    requestVote: (message) =>
+        @logger.debug "RPC from [#{message.candidateId}]", "requestVote", "request =", message
 
-        @role.assertRole vote
-        @role.countVote vote, @peers.length
-
-
-    requestVote: (message, callback) ->
-        @logger.info @id, "peer request vote", message
         @role.assertRole message
         await @role.requestVote message, defer error, voteGranted
 
-        callback? error, {
+        response = 
             id: @id
             term: @log.currentTerm
             voteGranted: voteGranted
-        }
+
+        @logger.debug "RPC from [#{message.candidateId}]", "requestVote", "error =", error, "response =", response
+
+        @callRPC message.candidateId, "requestVoteResponse", response
 
 
-    appendEntries: (message, callback) ->
+    requestVoteResponse: (message) =>
+        return if message.term < @log.currentTerm
+
         @role.assertRole message
+        @role.countVote message, @peers.length
+
+
+    appendEntries: (message) =>
+        @role.assertRole message, "appendEntries"
         await @role.appendEntries message, defer error, success
-        callback? error, 
+
+        response =
             term: @log.currentTerm
+            id: @id
+            matchIndex: message.entries.startIndex + message.entries.values.length - 1
+            prevLogIndex: message.prevLogIndex
             success: success
+
+        @callRPC message.leaderId, "appendEntriesResponse", response
+
+
+    appendEntriesResponse: (message) =>
+        @role.assertRole message
+        @role.entriesAppended message.id, message
+
 
     
     request: (entry, callback) ->

@@ -8,7 +8,8 @@ class MemoryStateMachine extends AbstractStateMachine
 
     execute: (operation, callback) ->
         @state++
-        callback? null, state
+        @logger.info "[state-machine]", "new state", @state
+        callback? null, @state
 
 
 module.exports = MemoryStateMachine

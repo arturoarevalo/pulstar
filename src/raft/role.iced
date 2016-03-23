@@ -19,13 +19,13 @@ class Role extends EventEmitter
 
 
     appendEntries: (message, callback) ->
-        callback? null, false
+        process.nextTick callback, null, false
 
     entriesAppended: (message, callback) ->
-        callback? null, false
+        process.nextTick callback, null, false
 
     requestVote: (vote, callback) ->
-        callback? null, false
+        process.nextTick callback, null, false
 
 
 module.exports = Role

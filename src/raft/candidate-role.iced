@@ -23,13 +23,21 @@ class CandidateRole extends Role
     countVote: (vote, totalPeers) ->
         if vote.voteGranted
             @votes[vote.id] = true
-            if Object.keys(@votes).length > (totalPeers + 1) / 2
+
+            votesCount = Object.keys(@votes).length
+            majority = (totalPeers + 1) / 2
+            @logger.info "[candidate]", "got votes from", @votes, "count =", votesCount, "majority =", majority
+            if votesCount > majority
+                @logger.info "[candidate]", "won election"
                 @clearElectionTimeout()
                 @emit "changeRole", "leader"
 
     request: (entry, callback) ->
         # Error ...
-        callback? { message: "not the leader" }
+        error = 
+            message: "not the leader"
+
+        process.nextTick callback, error
 
 
 module.exports = CandidateRole
