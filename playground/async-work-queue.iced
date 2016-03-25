@@ -93,9 +93,11 @@ queue.push "muffi", cb
 queue.push "pablo", cb
 queue.push "chief", cb
 
+
 setTimeout ->
     queue.push "nextone", cb
 , 10000
+
 
 console.log "finished queuing"
 
