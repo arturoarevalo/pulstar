@@ -1,21 +1,31 @@
 require "coffee-script-properties"
 {EventEmitter} = require "events"
 
+async = require "async"
+
 
 
 class AsyncWorkQueue extends EventEmitter
 
-    constructor: (@concurrency = 1) ->
+    constructor: (@concurrency = 1, worker = null) ->
+        @worker = worker or @processTask
+
         @queue =
             head: null
             tail: null
-            waiting: 0
-            running: 0
+            length: 0
 
-    @getter "waiting", -> @queue.waiting
-    @getter "length", -> @queue.waiting
-    @getter "running", -> @queue.running
+        @indices = []
+        @slots = []
 
+        for i in [0 .. @concurrency - 1]
+            @indices[i] = -1
+            @slots.push i
+
+    @getter "waiting", -> @queue.length
+    @getter "length", -> @queue.length
+    @getter "running", -> @concurrency - @slots.length
+    @getter "working", -> (item for item in @indices when item isnt null)
 
     push: (task, callback) ->
         tasklet = 
@@ -30,56 +40,81 @@ class AsyncWorkQueue extends EventEmitter
         if not @queue.head
             @queue.head = @queue.tail = tasklet
 
-        @queue.waiting++
-        @eventLoop()
-
+        @queue.length++
+        @scheduleEventLoop()
 
     extractTasklet: ->
-        available = @concurrency - @running
-        if available and @queue.head
-            item =
-                task: @queue.head.task
-                callback: @queue.head.callback
+        item = @queue.head
 
-            if @queue.head is @queue.tail
-                @queue.head = @queue.tail = null
-            else
-                @queue.head = @queue.head.next
+        if @queue.head is @queue.tail
+            @queue.head = @queue.tail = null
+        else
+            @queue.head = @queue.head.next
 
-            @queue.waiting--
-            return item
+        @queue.length--
+        return item
 
-        return null
-
-
-    eventLoop: => @runTask tasklet while (tasklet = @extractTasklet()) isnt null
-
-    runTask: (tasklet) ->
-        @queue.running++
-        @processTask tasklet.task, (error, args...) =>
-            @queue.running--
+    scheduleEventLoop: =>
+        if not @eventLoopScheduled
+            @eventLoopScheduled = true
             process.nextTick @eventLoop
 
-            tasklet.callback? error, args...
+    eventLoop: => 
+        @eventLoopScheduled = false
+        while (@queue.head) and ((slot = @slots.pop()) isnt undefined)
+            @runTask slot, @extractTasklet()
+
+    runTask: (slot, tasklet) ->
+        @indices[slot] = tasklet.task
+        try
+            @worker tasklet.task, (error, data) =>
+                try
+                    tasklet?.callback error, data
+                catch cbex
+                    console.error cbex
+
+                @indices[slot] = null
+                @slots.push slot
+                @scheduleEventLoop()
+        catch ex
+            try
+                tasklet?.callback error, data
+            catch cbex
+                console.error cbex
+
+            @indices[slot] = null
+            @slots.push slot
+            @scheduleEventLoop()
 
 
     processTask: (task, callback) ->
         callback?()
 
 
-
-
-
-
 class MQ extends AsyncWorkQueue
 
     processTask: (task, callback) ->
         console.log "hello #{task}"
-        setTimeout callback, 1000, null, task
+        setTimeout callback, 500, null, task
         #callback null, task
 
-queue = new MQ 5
+#queue = new MQ 3
 
+###
+queue = new AsyncWorkQueue 3, (task, callback) ->
+        console.log "hello #{task}"
+        setTimeout callback, 500, null, task
+        #callback null, task
+###
+
+###
+w = (task, callback) ->
+    console.log "hello #{task}"
+    setTimeout callback, 500, null, task
+    #callback null, task
+
+queue = async.queue w, 3
+#queue = new AsyncWorkQueue 
 
 cb = (err, data) -> console.log "finished saying hello to #{data}"
 
@@ -93,12 +128,34 @@ queue.push "muffi", cb
 queue.push "pablo", cb
 queue.push "chief", cb
 
+setTimeout -> queue.push "nextone", cb
+,1000
+###
 
-setTimeout ->
-    queue.push "nextone", cb
-, 10000
 
 
-console.log "finished queuing"
+done = 0
+calledBack = 0
+TOTAL = 2000
 
+cb = (err, data) -> 
+    calledBack++
+    if calledBack is TOTAL
+        console.timeEnd "queue"
+        console.log "finished! done=#{done} calledback=#{calledBack}"
+        console.log queue.length
+        console.log queue.running
+        console.log queue.working
+
+worker = (task, callback) ->
+    done++
+    callback()
+
+queue = new AsyncWorkQueue 1, worker
+#queue = async.queue worker, 1
+
+console.time "queue"
+
+for i in [1 .. TOTAL]
+    queue.push i, cb
 
