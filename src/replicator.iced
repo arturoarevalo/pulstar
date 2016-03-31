@@ -1,3 +1,5 @@
+module.exports = Replicator
+
 {EventEmitter} = require "events"
 
 class Replicator extends EventEmitter
@@ -69,7 +71,3 @@ class Replicator extends EventEmitter
                 peer.streaming = false
                 peer.nextIndex = nextIndex
                 @replicate()
-
-
-module.exports = Replicator
-

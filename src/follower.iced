@@ -1,6 +1,7 @@
+module.exports = Follower
+
 Role = require "role"
 {PassThrough} = require "stream"
-
 
 class Follower extends Role
 
@@ -142,6 +143,3 @@ class Follower extends Role
 
         if request.done and not request.first
             @installingSnapshot.end request.data
-
-
-module.exports = Follower

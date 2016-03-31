@@ -1,3 +1,5 @@
+module.exports = Candidate
+
 Role = require "role"
 
 class Candidate extends Role
@@ -44,6 +46,3 @@ class Candidate extends Role
     onBroadcastResponse: (error, response) =>
         if not @stopped and response?.voteGranted
             @countVote()
-
-
-module.exports = Candidate
