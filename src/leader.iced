@@ -1,7 +1,5 @@
-module.exports = Leader
-
-Role = require "role"
-Replicator = require "replicator"
+Role = require "./role"
+Replicator = require "./replicator"
 
 class Leader extends Role
 
@@ -131,3 +129,6 @@ class Leader extends Role
                     timeout = undefined
 
                 callback? error
+
+
+module.exports = Leader

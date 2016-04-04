@@ -3,7 +3,7 @@ cuid = require "cuid"
 
 class Cluster
 
-    DEFAULT_OPTIONS = {}
+    @DEFAULT_OPTIONS = {}
 
     constructor: (options) ->
         @options = extend {}, Cluster.DEFAULT_OPTIONS, options

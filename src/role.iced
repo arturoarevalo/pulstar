@@ -1,5 +1,3 @@
-module.exports = Role
-
 {EventEmitter} = require "events"
 
 class Role extends EventEmitter
@@ -60,3 +58,6 @@ class Role extends EventEmitter
                 term: @node.currentTerm
                 success: false
                 reason: "term is behind current term"
+
+
+module.exports = Role

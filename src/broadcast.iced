@@ -1,5 +1,3 @@
-module.exports = Broadcast
-
 {EventEmitter} = require "events"
 
 class Broadcast extends EventEmitter
@@ -16,3 +14,6 @@ class Broadcast extends EventEmitter
 
     cancel: ->
         @removeAllListeners()
+
+
+module.exports = Broadcast

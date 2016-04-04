@@ -1,4 +1,4 @@
-extend = require "extend"
+extend = require "xtend"
 cuid = require "cuid"
 
 {EventEmitter} = require "events"
@@ -7,6 +7,7 @@ Log = require "./log"
 Cluster = require "./cluster"
 LogApplier = require "./log-applier"
 Broadcast = require "./broadcast"
+Peer = require "./peer"
 
 Idle = require "./idle"
 Standby = require "./standby"
@@ -18,7 +19,7 @@ Leader = require "./leader"
 
 class Node extends EventEmitter
 
-    DEFAULT_OPTIONS = 
+    @DEFAULT_OPTIONS = 
         standby: false
         minElectionTimeout: 150
         maxElectionTimeout: 300

@@ -1,6 +1,6 @@
 module.exports = Idle
 
-Follower = require "follower"
+Follower = require "./follower"
 
 class Idle extends Follower
 
